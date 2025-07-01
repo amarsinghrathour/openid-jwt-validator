@@ -111,30 +111,42 @@ func (v *Validator) FetchOpenIDConfiguration() error {
 // This implements Microsoft's recommendation to refresh keys every 24 hours.
 // The method is automatically called by ValidateToken and GetPublicKeyByKid.
 func (v *Validator) FetchJWKSIfNeeded() error {
-	if v.jwks != nil && time.Since(v.jwksFetched) < 24*time.Hour {
+	// Check if we need to fetch new keys (no cache or cache is older than 24 hours)
+	shouldFetch := v.jwks == nil || time.Since(v.jwksFetched) >= 24*time.Hour
+	
+	if !shouldFetch {
 		return nil // Use cached keys
 	}
+	
 	if v.openIDConfig == nil {
 		return fmt.Errorf("OpenID configuration not fetched. Call FetchOpenIDConfiguration first")
 	}
+	
+	// Fetch new keys from Microsoft's JWKS endpoint
 	resp, err := v.client.Get(v.openIDConfig.JWKSURI)
 	if err != nil {
 		return fmt.Errorf("failed to fetch JWKS: %w", err)
 	}
 	defer resp.Body.Close()
+	
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to fetch JWKS: status %d", resp.StatusCode)
 	}
+	
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
+	
 	jwks, err := jwk.Parse(body)
 	if err != nil {
 		return fmt.Errorf("failed to parse JWKS: %w", err)
 	}
+	
+	// Update cache with new keys and timestamp
 	v.jwks = jwks
 	v.jwksFetched = time.Now()
+	
 	return nil
 }
 
